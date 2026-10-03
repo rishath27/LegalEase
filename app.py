@@ -10,10 +10,15 @@ st.set_page_config(
     layout="wide"
 )
 
-API_URL = os.getenv(
-    "LEGAL_EASE_API_URL",
-    "http://127.0.0.1:8000"
-)
+try:
+    API_URL = st.secrets["LEGAL_EASE_API_URL"]
+except Exception:
+    API_URL = os.getenv(
+        "LEGAL_EASE_API_URL",
+        "http://127.0.0.1:8000"
+    )
+
+API_URL = API_URL.rstrip("/")
 
 # ---------- Custom CSS ----------
 st.markdown("""
