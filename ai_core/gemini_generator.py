@@ -6,7 +6,7 @@ load_dotenv()
 
 
 class GeminiDocumentGenerator:
-    """Gemini-powered legal document drafting with automatic retry for temporary errors."""
+    """Gemini-powered legal document drafting with retry handling."""
 
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
@@ -15,7 +15,6 @@ class GeminiDocumentGenerator:
             "gemini-3.8-flash"
         )
 
-        # Retry configuration
         self.max_retries = 3
         self.retry_delays = [3, 7, 15]
 
@@ -28,7 +27,6 @@ class GeminiDocumentGenerator:
         jurisdiction,
         additional_instructions=""
     ):
-
         if not self.api_key:
             raise RuntimeError(
                 "GEMINI_API_KEY is missing. "
@@ -38,9 +36,7 @@ class GeminiDocumentGenerator:
         try:
             from google import genai
 
-            client = genai.Client(
-                api_key=self.api_key
-            )
+            client = genai.Client(api_key=self.api_key)
 
             prompt = f"""Draft a clear, editable first draft of a {document_type} using the details below.
 
@@ -63,23 +59,17 @@ Requirements:
 
 Return only the document text."""
 
-            # ---------- Gemini Request with Retry ----------
             last_error = None
 
             for attempt in range(self.max_retries + 1):
 
                 try:
-
                     response = client.models.generate_content(
                         model=self.model_name,
                         contents=prompt
                     )
 
-                    text = getattr(
-                        response,
-                        "text",
-                        None
-                    )
+                    text = getattr(response, "text", None)
 
                     if not text:
                         raise RuntimeError(
@@ -92,24 +82,32 @@ Return only the document text."""
                 except Exception as exc:
 
                     last_error = exc
-
                     error_text = str(exc).upper()
 
-                    # Retry only temporary availability / server errors
+                    # Quota / rate limit error:
+                    # Do not waste retries when Gemini explicitly
+                    # says the quota has been exceeded.
+                    if (
+                        "429" in error_text
+                        or "RESOURCE_EXHAUSTED" in error_text
+                    ):
+                        raise RuntimeError(
+                            "Gemini API quota has been exceeded. "
+                            "Please wait and try again later, "
+                            "or check your Gemini API usage and billing limits."
+                        ) from exc
+
+                    # Temporary server errors can be retried.
                     retryable = (
                         "503" in error_text
                         or "UNAVAILABLE" in error_text
-                        or "429" in error_text
-                        or "RESOURCE_EXHAUSTED" in error_text
                         or "500" in error_text
                         or "INTERNAL" in error_text
                     )
 
-                    # If it is the final attempt, stop retrying
                     if attempt >= self.max_retries:
                         break
 
-                    # Do not retry permanent errors
                     if not retryable:
                         raise RuntimeError(
                             f"Gemini request failed: {exc}"
